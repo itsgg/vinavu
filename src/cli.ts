@@ -8,8 +8,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { parseArgs, UsageError, type Opts } from "./args.js";
 import { DIR_MODE, FILE_MODE, HOME, SESS_DIR } from "./paths.js";
 import { ESC, T, bold, cols, promptMark, setPlain } from "./theme.js";
-import { render, renderSources, turnRule } from "./render.js";
-import { createStreamRender } from "./stream.js";
+import { markdownSources, render, renderSources, turnRule } from "./render.js";
+import { createPassThrough, createStreamRender } from "./stream.js";
 import { buildMessage, extractAtFiles, splitAttachments } from "./protocol.js";
 import {
   exportSessionMarkdown,
@@ -75,6 +75,7 @@ const engineAsk: AskFn = (req, hooks) => askEngine(req, hooks, timeoutFor(req.mo
 
 /** Wires the progressive renderer to this invocation's flags and streams. */
 function streamRender(label?: string) {
+  if (OPTS.markdown) return createPassThrough();
   return createStreamRender({
     label,
     json: OPTS.json,
@@ -95,7 +96,23 @@ async function readStdin(): Promise<string> {
 /** The sources an answer cites, under it, unless asked not to or writing JSON. */
 function showSources(sources: Source[], answer: string): void {
   if (OPTS.json || OPTS.noSources || !sources.length) return;
-  say("\n" + renderSources(sources, answer) + "\n");
+  if (OPTS.markdown) say("\n" + markdownSources(sources, answer) + "\n");
+  else say("\n" + renderSources(sources, answer) + "\n");
+}
+
+/**
+ * Whether the session's thread is too old to follow up in, with
+ * --follow-within: a launcher asking in one session wants a conversation
+ * while it is fresh, as Ask's ten minutes, and a new thread after.
+ */
+export function stale(session: Session | null, now = Date.now()): boolean {
+  if (!session || !OPTS.followWithin) return false;
+  // Timed from the last answer, not from the session's last write: /model
+  // and /system write it too, and must not freshen an old thread (Cursor
+  // 2026-10-11). No answer at all is nothing to follow.
+  const last = session.turns.length ? session.turns[session.turns.length - 1].at : 0;
+  const age = now - last;
+  return !(age >= 0 && age < OPTS.followWithin * 60_000);
 }
 
 // --- flows -----------------------------------------------------------------
@@ -118,6 +135,16 @@ export async function askAndRecord(
   // The sources as they arrive, so an answer cut short keeps the ones its
   // text already cites.
   let sources: Source[] = [];
+  // A new thread on purpose: --new, or a session too old to follow up in.
+  // The old thread is then let go whatever this answer brings back, so a
+  // reply cut short cannot leave it there for the next question to follow
+  // (Cursor 2026-10-11).
+  const fresh = !!session && (OPTS.fresh || stale(session));
+  const letGo = (s: Session) => {
+    if (!fresh) return;
+    s.thread = undefined;
+    s.url = undefined;
+  };
   try {
     const { upload, inline } = splitAttachments(files);
     for (const f of upload) if (!existsSync(f)) throw new Error(`cannot read file: ${f}`);
@@ -126,7 +153,7 @@ export async function askAndRecord(
       {
         query: buildMessage(question, inline, system),
         model: OPTS.model ?? session?.model,
-        thread: session && !OPTS.fresh ? session.thread : undefined,
+        thread: session && !fresh ? session.thread : undefined,
         files: upload.map((f) => resolve(f)),
       },
       {
@@ -161,6 +188,7 @@ export async function askAndRecord(
         // is where the next question continues. Both turns stay in the
         // transcript. Serialising whole asks per session would make the second
         // wait out the first's answer, which costs more than it saves.
+        letGo(s);
         if (answer.thread) s.thread = answer.thread;
         if (answer.url) s.url = answer.url;
         if (OPTS.model) s.model = OPTS.model;
@@ -179,10 +207,17 @@ export async function askAndRecord(
     // the transcript agree about what happened.
     const shown = sr.shown().trim();
     if (!shown) throw e;
+    // A launcher reading --markdown gets the fragment as a whole document:
+    // ended by a newline, and with the sources it already cites.
+    if (OPTS.markdown) {
+      if (!sr.shown().endsWith("\n")) say("\n");
+      showSources(sources, shown);
+    }
     let turn: number | undefined;
     if (session) {
       const saved = updateSession(session.name, (s) => {
         s.turns.push({ q: question, a: shown, at: Date.now(), partial: true, ...(sources.length ? { sources } : {}) });
+        letGo(s);
         if (OPTS.model) s.model = OPTS.model;
         if (OPTS.system) s.system = OPTS.system;
       });
@@ -197,6 +232,9 @@ export async function askAndRecord(
 
 async function runOnce(ask: AskFn): Promise<void> {
   const question = OPTS.question || (await readStdin());
+  // Machine output is the answer or nothing: a caller reading --json or
+  // --markdown must not get the help page as an answer (Cursor 2026-10-11).
+  if (!question && (OPTS.json || OPTS.markdown)) throw new UsageError("no question: give one, or pipe it in");
   if (!question) {
     printHelp();
     process.exit(2);
@@ -493,6 +531,8 @@ const FLAGS = [
   "--list",
   "--raw",
   "--json",
+  "--markdown",
+  "--follow-within",
   "--quiet",
   "--no-sources",
   "--help",
@@ -582,6 +622,10 @@ ${b("Options")}
       --list              list saved sessions
       --raw               plain text, no color or markdown styling
       --json              print one JSON object instead of a rendered answer
+      --markdown          the answer as raw Markdown, written as it arrives,
+                          its cited sources as links after it
+      --follow-within MIN follow up in the session's thread only if its last
+                          answer is under MIN minutes old
       --no-sources        leave out the source list under the answer
   -q, --quiet             no spinner or progress line
   -h, --help              show this help
@@ -738,6 +782,9 @@ export async function main(argv = process.argv, ask: AskFn = engineAsk): Promise
   // answer, so the combination would show a prompt and nothing else.
   if (interactive && OPTS.json)
     throw new UsageError("--json is for one-shot questions, not the interactive REPL");
+  if (interactive && OPTS.markdown)
+    throw new UsageError("--markdown is for one-shot questions, not the interactive REPL");
+  if (OPTS.json && OPTS.markdown) throw new UsageError("--json and --markdown are two ways to print one answer: pick one");
   if (interactive) await runInteractive(ask);
   else await runOnce(ask);
 }

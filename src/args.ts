@@ -5,12 +5,14 @@ export interface Opts {
   model?: string;
   system?: string;
   timeout?: number; // seconds
+  followWithin?: number; // minutes
   cont: boolean;
   fresh: boolean;
   interactive: boolean;
   list: boolean;
   raw: boolean;
   json: boolean;
+  markdown: boolean;
   quiet: boolean;
   noSources: boolean;
   help: boolean;
@@ -29,6 +31,7 @@ export function parseArgs(argv: string[]): Opts {
     list: false,
     raw: false,
     json: false,
+    markdown: false,
     quiet: false,
     noSources: false,
     help: false,
@@ -88,6 +91,15 @@ export function parseArgs(argv: string[]): Opts {
         i = ni;
         break;
       }
+      case "--follow-within": {
+        const [v, ni] = value(i, "--follow-within");
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0)
+          throw new UsageError("--follow-within needs a positive number of minutes");
+        o.followWithin = n;
+        i = ni;
+        break;
+      }
       case "-c":
       case "--continue":
         o.cont = true;
@@ -107,6 +119,9 @@ export function parseArgs(argv: string[]): Opts {
         break;
       case "--json":
         o.json = true;
+        break;
+      case "--markdown":
+        o.markdown = true;
         break;
       case "-q":
       case "--quiet":

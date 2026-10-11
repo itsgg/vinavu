@@ -85,3 +85,12 @@ test("--no-sources is a flag, not part of the question", () => {
   assert.equal(o.noSources, true);
   assert.equal(o.question, "what is uv");
 });
+
+test("--markdown is a flag and --follow-within takes minutes", () => {
+  const o = parseArgs(["--markdown", "--follow-within", "10", "q"]);
+  assert.equal(o.markdown, true);
+  assert.equal(o.followWithin, 10);
+  assert.equal(o.question, "q");
+  assert.throws(() => parseArgs(["--follow-within", "soon", "q"]), /positive number of minutes/);
+  assert.throws(() => parseArgs(["--follow-within"]), /--follow-within needs a value/);
+});

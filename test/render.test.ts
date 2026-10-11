@@ -379,3 +379,27 @@ test("an overlong title is cut, and no sources means no list", () => {
   assert.ok(out.split("\n")[1].length < 130);
   assert.equal(renderSources([]), "");
 });
+
+test("markdown sources list the cited ones as links, by their own numbers", async () => {
+  const { markdownSources } = await import("../src/render.js");
+  const md = markdownSources(
+    [
+      { title: "One [draft]", url: "https://one.example" },
+      { title: "Two", url: "https://two.example" },
+    ],
+    "Claim.[1]",
+  );
+  assert.equal(md, "Sources:\n\n- [1] [One draft](<https://one.example/>)");
+  assert.equal(markdownSources([], "x"), "");
+});
+
+test("a source link survives whatever the page called itself, and only http links", async () => {
+  const { markdownLink } = await import("../src/render.js");
+  assert.equal(markdownLink({ title: "Ends in a backslash\\", url: "https://a.example/x" }), "[Ends in a backslash](<https://a.example/x>)");
+  assert.equal(markdownLink({ title: "**Bold** _it_", url: "https://a.example/x" }), "[Bold it](<https://a.example/x>)");
+  assert.equal(markdownLink({ title: "Parens", url: "https://en.wikipedia.org/wiki/Tokyo_(city)" }),
+    "[Parens](<https://en.wikipedia.org/wiki/Tokyo_(city)>)");
+  assert.equal(markdownLink({ title: "Evil", url: "javascript:alert(1)" }), "Evil");
+  assert.equal(markdownLink({ title: "", url: "not a url" }), "Untitled source");
+  assert.equal(markdownLink({ title: "", url: "https://b.example/a b" }), "[b.example](<https://b.example/a%20b>)");
+});

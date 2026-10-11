@@ -303,3 +303,92 @@ test("an answer that breaks off is kept with its sources and the model it was as
   assert.equal(saved.turns[0].partial, true);
   assert.deepEqual(saved.turns[0].sources, [{ title: "Docs", url: "https://docs.example/a" }]);
 });
+
+test("--markdown prints the answer raw, then its cited sources as Markdown links", () => {
+  const r = run(["--markdown", "q"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "The answer is 42.[1]\n\nSources:\n\n- [1] [Docs](<https://docs.example/a>)\n");
+});
+
+test("--markdown is refused with --json and in the REPL", () => {
+  assert.equal(run(["--markdown", "--json", "q"]).status, 2);
+  assert.match(run(["--markdown", "-i", "q"]).stderr, /--markdown is for one-shot questions/);
+});
+
+test("--follow-within follows a fresh session up and starts a new thread for a stale one", () => {
+  const home = mkdtempSync(join(tmpdir(), "vinavu-within-"));
+  const at = (name: string, updatedAt: number) => {
+    mkdirSync(join(home, "sessions"), { recursive: true });
+    writeFileSync(
+      join(home, "sessions", `${name}.json`),
+      JSON.stringify({
+        name,
+        createdAt: 1,
+        updatedAt,
+        thread: { backend_uuid: "old-b", read_write_token: "r", slug: "s" },
+        turns: [{ q: "earlier", a: "answer", at: updatedAt }],
+      }),
+    );
+  };
+  at("fresh", Date.now() - 2 * 60_000);
+  run(["-s", "fresh", "--follow-within", "10", "q"], { home });
+  assert.equal((requests().at(-1)!.thread as { backend_uuid: string }).backend_uuid, "old-b");
+  at("stale", Date.now() - 30 * 60_000);
+  run(["-s", "stale", "--follow-within", "10", "q"], { home });
+  assert.equal(requests().at(-1)!.thread, undefined);
+  run(["-s", "stale", "q again"], { home });
+  assert.notEqual(requests().at(-1)!.thread, undefined, "the new thread was not kept for the next question");
+});
+
+// --- from review (Cursor gpt-5.6-sol-high, 2026-10-11, second round) --------
+
+test("--markdown with no question is a usage error with nothing on stdout", () => {
+  const r = run(["--markdown"], { input: "" });
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /no question/);
+});
+
+test("a cut-short --markdown answer still ends with a newline and its sources", () => {
+  const r = run(["--markdown", "BREAK now"]);
+  assert.equal(r.status, 1);
+  // Blank lines between the fragment and the list are Markdown's to collapse.
+  assert.match(r.stdout, /^A first paragraph\.\[1\]\n+Sources:\n\n- \[1\] \[Docs\]\(<https:\/\/docs\.example\/a>\)\n$/);
+});
+
+test("--follow-within is timed from the last answer, not the session's last write", () => {
+  const home = mkdtempSync(join(tmpdir(), "vinavu-within2-"));
+  mkdirSync(join(home, "sessions"), { recursive: true });
+  // Written a minute ago (a /model, say), answered an hour ago.
+  writeFileSync(
+    join(home, "sessions", "old.json"),
+    JSON.stringify({
+      name: "old",
+      createdAt: 1,
+      updatedAt: Date.now() - 60_000,
+      thread: { backend_uuid: "old-b", read_write_token: "r", slug: "s" },
+      turns: [{ q: "earlier", a: "answer", at: Date.now() - 60 * 60_000 }],
+    }),
+  );
+  run(["-s", "old", "--follow-within", "10", "q"], { home });
+  assert.equal(requests().at(-1)!.thread, undefined);
+});
+
+test("a thread let go by --new is not followed after a reply cut short", () => {
+  const home = mkdtempSync(join(tmpdir(), "vinavu-letgo-"));
+  mkdirSync(join(home, "sessions"), { recursive: true });
+  writeFileSync(
+    join(home, "sessions", "s.json"),
+    JSON.stringify({
+      name: "s",
+      createdAt: 1,
+      updatedAt: Date.now(),
+      thread: { backend_uuid: "rejected", read_write_token: "r", slug: "s" },
+      url: "https://www.perplexity.ai/search/s",
+      turns: [{ q: "earlier", a: "answer", at: Date.now() }],
+    }),
+  );
+  run(["-s", "s", "--new", "BREAK now"], { home });
+  run(["-s", "s", "next"], { home });
+  assert.equal(requests().at(-1)!.thread, undefined, "followed the thread --new let go");
+});

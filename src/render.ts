@@ -301,6 +301,38 @@ export function renderSources(sources: Source[], answer?: string): string {
   return lines.join("\n");
 }
 
+/** The cited sources as a Markdown list, for --markdown: numbered as the answer's markers. */
+export function markdownSources(sources: Source[], answer: string): string {
+  if (!sources.length) return "";
+  const cited = citedNumbers(answer).filter((n) => n >= 1 && n <= sources.length);
+  const numbers = cited.length ? cited.sort((a, b) => a - b) : sources.map((_, i) => i + 1);
+  const lines = numbers.map((n) => `- [${n}] ${markdownLink(sources[n - 1])}`);
+  return "Sources:\n\n" + lines.join("\n");
+}
+
+/**
+ * One source as a Markdown link, safe whatever the page called itself.
+ *
+ * The title loses what would end or escape the link's text (brackets, a
+ * backslash) and every Markdown mark; the address goes in angle brackets,
+ * which CommonMark reads whole, parentheses and all, with what may not be
+ * inside them percent-encoded. Only http and https are linked: another
+ * scheme is shown as text, not offered as a link to follow.
+ */
+export function markdownLink(s: Source): string {
+  const title = s.title.replace(/[\[\]\\`*_<>]/g, "").replace(/\s+/g, " ").trim();
+  let url: URL | null = null;
+  try {
+    url = new URL(s.url);
+  } catch {
+    url = null;
+  }
+  if (!url || (url.protocol !== "http:" && url.protocol !== "https:"))
+    return (title || "Untitled source").replace(/^\s*$/, "Untitled source");
+  const href = url.href.replace(/[<>\s]/g, (c) => encodeURIComponent(c));
+  return `[${title || url.hostname}](<${href}>)`;
+}
+
 // --- streaming boundaries --------------------------------------------------
 
 /**

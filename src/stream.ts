@@ -181,3 +181,37 @@ export function createStreamRender(o: StreamOptions = {}): StreamRender {
     },
   };
 }
+
+/**
+ * The answer as Markdown, written as it arrives: no rendering, no progress
+ * line, for a program that reads vinavu's output and draws it itself (a
+ * launcher's answer pane). Nothing is buffered, so `shown` is every delta
+ * written; the final answer tops up only a stream that stopped short of it.
+ * A final that corrects words already written is not printed: what went out
+ * cannot be taken back, so the caller keeps the streamed text and the
+ * session the corrected one, as on a terminal (Cursor 2026-10-11, accepted:
+ * the engine has never been seen to correct a stream).
+ */
+export function createPassThrough(out: (s: string) => void = (s) => process.stdout.write(s)): StreamRender {
+  let written = "";
+  return {
+    begin() {},
+    status() {},
+    push(chunk: string) {
+      written += chunk;
+      out(chunk);
+    },
+    finish(content: string) {
+      const full = content ?? "";
+      if (full.length > written.length && full.startsWith(written)) {
+        out(full.slice(written.length));
+        written = full;
+      }
+      if (written && !written.endsWith("\n")) out("\n");
+    },
+    stop() {},
+    shown() {
+      return written;
+    },
+  };
+}

@@ -307,3 +307,22 @@ test("the engine's status shows on the progress line until text arrives", () => 
   assert.match(h.stderr(), /line one line two…/);
   h.sr.stop();
 });
+
+test("the pass-through writes each delta as it comes and tops up only a short stream", async () => {
+  const { createPassThrough } = await import("../src/stream.js");
+  let out = "";
+  const sr = createPassThrough((s) => (out += s));
+  sr.begin();
+  sr.status("searching");
+  sr.push("**Tokyo** is");
+  assert.equal(out, "**Tokyo** is");
+  sr.push(" the capital");
+  sr.finish("**Tokyo** is the capital.[1]");
+  assert.equal(out, "**Tokyo** is the capital.[1]\n");
+  assert.equal(sr.shown(), "**Tokyo** is the capital.[1]");
+  let other = "";
+  const sr2 = createPassThrough((s) => (other += s));
+  sr2.push("streamed\n");
+  sr2.finish("a different final");
+  assert.equal(other, "streamed\n", "a divergent final must not be printed on top");
+});

@@ -84,6 +84,8 @@ vinavu models                        # every model name
 | `--list` | List saved sessions |
 | `--raw` | Plain text, no color or markdown styling |
 | `--json` | One JSON object instead of a rendered answer (one-shot only) |
+| `--markdown` | The answer as raw Markdown, written as it arrives, then its cited sources as links (one-shot only) |
+| `--follow-within MINUTES` | Follow up in the session's thread only if its last answer is under MINUTES old |
 | `--no-sources` | Leave out the source list |
 | `-q, --quiet` | No spinner or progress line |
 
@@ -122,6 +124,26 @@ numbered rule closing each turn.
 /clear                  clear the screen
 /exit                   quit
 ```
+
+### In a launcher
+
+`--markdown` is for a program that draws the answer itself. With
+`--follow-within`, one session behaves like a chat that forgets after a
+pause: a question within ten minutes of the last answer follows it, a later
+one starts a new thread. In [Nodi](https://github.com/itsgg/omarchy-nodi),
+as an answer in `nodi.json`:
+
+```jsonc
+"answers": [
+  { "keyword": "pp", "title": "Perplexity", "timeoutMs": 180000,
+    "command": ["bash", "-lc", "printf '%s' \"$NODI_QUERY\" | exec vinavu --markdown -s nodi --follow-within 10", "nodi-pp"] }
+]
+```
+
+`pp <question>` then streams Perplexity's answer into Nodi's pane. The
+question goes through stdin, never an argument, and `bash -l` puts a version
+manager's shims on PATH (with mise, run `mise reshim` once after `make
+install` so `vinavu` has one).
 
 ## OpenAI-compatible server
 
