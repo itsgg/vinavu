@@ -287,3 +287,135 @@ def test_the_space_is_not_suspected_for_a_rate_limit(monkeypatch):
         list(a.ask("q"))
     assert e.value.kind == "quota"
     assert checked == []
+
+
+
+class TierClient(FakeClient):
+    asked = 0
+
+    def get_account_profile(self):
+        TierClient.asked += 1
+
+        class P:
+            account_tier = "pro"
+
+        return P()
+
+
+def test_the_tier_is_asked_once_and_cached_for_a_day(monkeypatch):
+    import json as _json
+
+    from vinavu_engine.paths import home
+
+    seen = []
+    monkeypatch.setattr(upstream, "conversation", lambda p, cfg: (seen.append(upstream.Conversation_(FakeHTTP([stream("s", "b", ["ok"])]), cfg)), seen[-1])[1])
+    before = TierClient.asked
+    for _ in range(2):
+        a = Asker(find_token=lambda: token.Found("t", "test", None), make_client=lambda t: TierClient(),
+                  resolve_space=lambda t: "space-1", space_exists=lambda t, u: True, save="space")
+        list(a.ask("q"))
+    assert TierClient.asked == before + 1
+    assert [c.tier for c in seen] == ["pro", "pro"]
+    assert _json.loads((home() / "account.json").read_text())["tier"] == "pro"
+
+
+def test_a_model_refused_on_a_cached_tier_forgets_the_tier(monkeypatch):
+    from perplexity_webui_scraper._internal.exceptions import ModelAccessError
+
+    from vinavu_engine.paths import home, write_private
+
+    import hashlib as _h
+    import time as _t
+
+    digest = _h.sha256(b"tok-1").hexdigest()[:16]
+    write_private(home() / "account.json", '{"tier": "pro", "account": "%s", "at": %f}' % (digest, _t.time()))
+    http = FlakyHTTP([stream("s", "b", ["ok"])], ModelAccessError("perplexity/best", "max", "pro"))
+    with pytest.raises(AskError) as e:
+        list(asker(monkeypatch, http).ask("q"))
+    assert e.value.kind == "model"
+    assert not (home() / "account.json").exists()
+
+
+
+# --- from review of the tier cache (Cursor gpt-5.6-sol-high, 2026-10-11) ----
+
+
+def tier_asker(monkeypatch, tok="t", tier="pro"):
+    class C(FakeClient):
+        asked = 0
+
+        def get_account_profile(self):
+            C.asked += 1
+
+            class P:
+                account_tier = tier
+
+            return P()
+
+    held = []
+    monkeypatch.setattr(upstream, "conversation",
+                        lambda p, cfg: (held.append(upstream.Conversation_(FakeHTTP([stream("s", "b", ["ok"])]), cfg)), held[-1])[1])
+    a = Asker(find_token=lambda: token.Found(tok, "test", None), make_client=lambda t: C(),
+              resolve_space=lambda t: "space-1", space_exists=lambda t, u: True, save="space")
+    return a, C, held
+
+
+def test_another_sign_in_asks_its_own_tier(monkeypatch):
+    a, C, _ = tier_asker(monkeypatch, tok="first")
+    list(a.ask("q"))
+    b, D, held = tier_asker(monkeypatch, tok="second", tier="free")
+    list(b.ask("q"))
+    assert D.asked == 1, "the first account's cached tier was used for the second"
+    assert held[-1].tier == "free"
+
+
+def test_a_tier_the_library_does_not_know_is_not_used(monkeypatch):
+    from vinavu_engine.paths import home
+
+    a, C, held = tier_asker(monkeypatch, tier="enterprise")
+    list(a.ask("q"))
+    assert held[-1].tier is None, "the library's own check runs instead"
+    assert not (home() / "account.json").exists()
+
+
+@pytest.mark.parametrize("at", ["9999999999", "1e400", "-5", '"soon"'])
+def test_a_cache_from_the_future_or_malformed_is_not_trusted(monkeypatch, at):
+    import hashlib as _h
+
+    from vinavu_engine.paths import home, write_private
+
+    digest = _h.sha256(b"t").hexdigest()[:16]
+    write_private(home() / "account.json", '{"tier": "max", "account": "%s", "at": %s}' % (digest, at))
+    a, C, held = tier_asker(monkeypatch)
+    list(a.ask("q"))
+    assert C.asked == 1
+    assert held[-1].tier == "pro"
+
+
+def test_a_tier_that_cannot_be_cached_is_still_held_in_memory(monkeypatch):
+    import vinavu_engine.ask as ask_module
+
+    def boom(*a, **k):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(ask_module, "write_private", boom)
+    a, C, held = tier_asker(monkeypatch)
+    for _ in range(3):
+        list(a.ask("q"))
+    assert C.asked == 1
+    assert [c.tier for c in held] == ["pro", "pro", "pro"]
+
+
+def test_forgetting_the_tier_never_hides_the_refusal(monkeypatch):
+    from pathlib import Path
+
+    from perplexity_webui_scraper._internal.exceptions import ModelAccessError
+
+    def boom(self, missing_ok=False):
+        raise PermissionError("read-only")
+
+    monkeypatch.setattr(Path, "unlink", boom)
+    http = FlakyHTTP([stream("s", "b", ["ok"])], ModelAccessError("perplexity/best", "max", "pro"))
+    with pytest.raises(AskError) as e:
+        list(asker(monkeypatch, http).ask("q"))
+    assert e.value.kind == "model"

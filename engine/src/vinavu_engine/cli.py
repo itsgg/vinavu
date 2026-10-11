@@ -148,7 +148,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from vinavu_engine.server import DEFAULT_HOST, DEFAULT_PORT
+    from vinavu_engine import DEFAULT_HOST, DEFAULT_PORT
 
     parser = argparse.ArgumentParser(prog="vinavu-engine", description=__doc__.splitlines()[0])
     parser.add_argument("-V", "--version", action="version", version=__version__)

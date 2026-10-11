@@ -196,3 +196,30 @@ def test_the_mcp_answer_lists_only_cited_sources():
     text = mcp_server.format_answer(done)
     assert "[2] Two <https://two.example>" in text
     assert "One" not in text
+
+
+
+def test_threads_writing_one_file_at_once_leave_it_whole():
+    import threading
+
+    from vinavu_engine.paths import home, write_private
+
+    target = home() / "same.json"
+    errors = []
+
+    def write(n):
+        try:
+            for i in range(50):
+                write_private(target, json.dumps({"writer": n, "i": i, "pad": "x" * (n * 100)}))
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    workers = [threading.Thread(target=write, args=(n,)) for n in range(1, 6)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+    assert errors == []
+    assert json.loads(target.read_text())["i"] == 49
+    assert not [p for p in target.parent.iterdir() if p.name.endswith(".tmp")]
+    assert oct(target.stat().st_mode & 0o777) == "0o600"

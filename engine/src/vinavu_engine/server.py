@@ -17,11 +17,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-from vinavu_engine import models, openai
+from vinavu_engine import DEFAULT_HOST, DEFAULT_PORT, models, openai
 from vinavu_engine.ask import AskError, Asker, Delta, Done
-
-DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8790
 
 # What an upstream failure becomes for an OpenAI client.
 STATUS = {"auth": 503, "quota": 429, "model": 400, "files": 400, "config": 500, "space": 502, "upstream": 502}

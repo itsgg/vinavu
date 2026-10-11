@@ -17,17 +17,36 @@ from typing import Any
 from perplexity_webui_scraper import ConversationConfig, Perplexity
 from perplexity_webui_scraper._internal.constants import API_BASE_URL, API_VERSION, DEFAULT_HEADERS
 from perplexity_webui_scraper.config.client import ClientConfig
+from perplexity_webui_scraper.core.account import (
+    AccountSession,
+    ensure_file_access,
+    ensure_model_access,
+    model_for_account,
+)
 from perplexity_webui_scraper.core.conversation import Conversation
 
 
 class Conversation_(Conversation):
     """The library's Conversation, plus the thread slug and settable tokens."""
 
-    __slots__ = ("thread_slug",)
+    __slots__ = ("thread_slug", "tier")
 
     def __init__(self, http: Any, config: ConversationConfig) -> None:
         super().__init__(http, config)
         self.thread_slug: str | None = None
+        # The account's tier, when the caller already knows it. The library
+        # asks the server for it before every question, a round trip each
+        # time; given it, the same checks run on what is known.
+        self.tier: str | None = None
+
+    def _validate_request_access(self, model: Any, has_files: bool) -> Any:
+        if self.tier is None:
+            return super()._validate_request_access(model, has_files)
+        effective = AccountSession.model_validate({"user": {"subscription_tier": self.tier}})
+        if model.status == "available":
+            ensure_model_access(effective, model)
+        ensure_file_access(self.tier, has_files)
+        return model_for_account(model, self.tier)
 
     def _apply_sse_data(self, data: dict[str, Any]) -> None:
         slug = data.get("thread_url_slug")

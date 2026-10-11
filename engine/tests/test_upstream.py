@@ -58,7 +58,10 @@ class FakeHTTP:
         self.streams = streams
         self.payloads: list[dict] = []
 
+    gets = 0
+
     def get(self, endpoint, params=None, rate_limited=True):
+        FakeHTTP.gets += 1
         return FakeResponse({"user": {"subscription_tier": "pro"}})
 
     def init_search(self, query):
@@ -110,3 +113,17 @@ def test_the_client_has_no_request_rate_limit():
         assert c._http._rate_limiter is None
     finally:
         c.close()
+
+
+def test_a_known_tier_spares_the_round_trip_before_each_question():
+    http = FakeHTTP([stream("s", "b", ["x"]), stream("s", "b", ["y"])])
+    known = upstream.Conversation_(http, ConversationConfig(model="perplexity/best"))
+    known.tier = "pro"
+    before = FakeHTTP.gets
+    known.ask("q", stream=True)
+    list(known)
+    assert FakeHTTP.gets == before
+    unknown = upstream.Conversation_(http, ConversationConfig(model="perplexity/best"))
+    unknown.ask("q", stream=True)
+    list(unknown)
+    assert FakeHTTP.gets == before + 1

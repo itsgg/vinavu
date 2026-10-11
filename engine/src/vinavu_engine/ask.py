@@ -6,6 +6,9 @@ tool) is a different way of printing these events.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import math
 import os
 import time
 from collections.abc import Callable, Iterator, Sequence
@@ -28,8 +31,14 @@ from perplexity_webui_scraper._internal.exceptions import (
 )
 
 from vinavu_engine import links, models, space, token, upstream
+from vinavu_engine.paths import home, write_private
 
 SAVE_MODES = ("space", "library", "incognito")
+# How long the account's tier is trusted before it is asked again.
+TIER_TTL_S = 24 * 3600
+# The tiers the pinned library knows: it reads any other as "unknown", and
+# its checks refuse even the default model for one (Cursor 2026-10-11).
+KNOWN_TIERS = ("free", "pro", "max")
 THREAD_URL = "https://www.perplexity.ai/search/{}"
 CRUMB_SEPARATORS = (" › ", " · ")
 HEARTBEAT_S = 15
@@ -272,6 +281,58 @@ class Asker:
         self._save = save
         self._token: str | None = None
         self._space: str | None = None
+        # (tier, account digest, when asked), and the account last asked for.
+        self._tier: tuple[str, str, float] | None = None
+        self._tier_asked: str | None = None
+
+    def tier(self, perplexity: Any) -> str | None:
+        """The account's tier: known here, cached for a day, else asked once.
+
+        Cached with a digest of the session token it was asked with, so
+        another sign-in asks again. None when it cannot be told, and the
+        library then asks before the question, as it always did.
+        """
+        now = time.time()
+        account = hashlib.sha256(self.token().encode()).hexdigest()[:16]
+        held = self._tier
+        if held and held[1] == account and 0 <= now - held[2] < TIER_TTL_S:
+            return held[0]
+        cache = home() / "account.json"
+        try:
+            saved = json.loads(cache.read_text())
+            at = float(saved["at"])
+            if (saved.get("tier") in KNOWN_TIERS and saved.get("account") == account
+                    and math.isfinite(at) and 0 <= now - at < TIER_TTL_S):
+                self._tier = (str(saved["tier"]), account, at)
+                return self._tier[0]
+        except (OSError, ValueError, TypeError, KeyError, AttributeError, OverflowError):
+            pass
+        if self._tier_asked == account:
+            return None
+        self._tier_asked = account
+        try:
+            tier = str(perplexity.get_account_profile().account_tier)
+        except Exception:  # noqa: BLE001 - the library's own check still runs
+            return None
+        if tier not in KNOWN_TIERS:
+            return None
+        # Held in memory too: a cache that cannot be written must not put the
+        # round trip back on every question a long-running server answers.
+        self._tier = (tier, account, now)
+        try:
+            write_private(cache, json.dumps({"tier": tier, "account": account, "at": now}))
+        except OSError:
+            pass
+        return tier
+
+    def forget_tier(self) -> None:
+        self._tier = None
+        self._tier_asked = None
+        try:
+            (home() / "account.json").unlink(missing_ok=True)
+        except OSError:
+            # The error being reported is the refusal, not this.
+            pass
 
     def token(self) -> str:
         if self._token is None:
@@ -309,6 +370,9 @@ class Asker:
                     retried_auth = True
                     self._token = None
                     continue
+                if isinstance(e, ModelAccessError | FileAccessError):
+                    # Refused on a tier read from the cache: it may have changed.
+                    self.forget_tier()
                 if not progress["text"] and save == "space" and not retried_space and self._space_gone(e):
                     retried_space = True
                     space.forget()
@@ -345,6 +409,7 @@ class Asker:
         perplexity = self._make_client(tok)
         try:
             conv = upstream.conversation(perplexity, config)
+            conv.tier = self.tier(perplexity)
             if thread:
                 conv.resume(thread.backend_uuid, thread.read_write_token)
             yield Status("asking")
