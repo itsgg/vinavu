@@ -1,0 +1,33 @@
+[project]
+name = "vinavu-engine"
+version = "0.1.0"
+description = "The engine behind vinavu: Perplexity Pro from scripts, an OpenAI-compatible server and an MCP tool"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "itsgg", email = "me@itsgg.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    # Pinned exactly: vinavu reaches into this library's conversation state
+    # (upstream.py), so an upgrade is a deliberate, tested step.
+    "perplexity-webui-scraper==1.1.10",
+    "cryptography>=43",
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "mcp>=2,<3",
+]
+
+[project.scripts]
+vinavu-engine = "vinavu_engine.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vinavu_engine"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

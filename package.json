@@ -1,0 +1,43 @@
+{
+  "name": "vinavu",
+  "version": "0.1.0",
+  "description": "Ask Perplexity from your terminal on your own Pro account: streaming answers with sources, threads that remember, and an OpenAI-compatible server.",
+  "type": "module",
+  "bin": {
+    "vinavu": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "test": "tsc -p tsconfig.test.json && node --test \".test-build/test/*.test.js\"",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit"
+  },
+  "keywords": [
+    "cli",
+    "terminal",
+    "perplexity",
+    "search",
+    "llm",
+    "markdown",
+    "streaming",
+    "openai"
+  ],
+  "author": "itsgg <me@itsgg.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/itsgg/vinavu.git"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

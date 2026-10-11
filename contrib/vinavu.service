@@ -1,0 +1,10 @@
+[Unit]
+Description=vinavu: Perplexity as an OpenAI-compatible server on 127.0.0.1:8790
+
+[Service]
+ExecStart=%h/.local/bin/vinavu-engine serve
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

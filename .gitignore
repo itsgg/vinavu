@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.test-build/
+*.log
+.DS_Store
+.env
+engine/.venv/
+__pycache__/
+.pytest_cache/
